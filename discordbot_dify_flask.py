@@ -7,6 +7,7 @@ import uuid
 from dotenv import load_dotenv
 from flask import Flask
 import threading
+import time  # time モジュールを追加
 
 # .env ファイルから環境変数を読み込む
 load_dotenv()
@@ -29,6 +30,9 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="@", intents=intents)
 # ユーザーIDとconversation_idを紐付ける辞書
 user_conversations = {}
+
+# 停止フラグ
+stop_threads = False
 
 async def send_chat_message(query: str, user: str, conversation_id: str = "", is_first_request: bool = False) -> dict:
     conversationId = "" 
@@ -126,19 +130,39 @@ async def chat_message_command(ctx: commands.Context, *, query: str):
 
 # Flaskを別スレッドで実行する関数
 def run_flask():
-    app.run(host='0.0.0.0', port=3000)
+    while not stop_threads:
+        try:
+            app.run(host='0.0.0.0', port=3000, debug=False, use_reloader=False)
+        except Exception as e:
+            print(f"Flask 実行中にエラーが発生しました: {e}")
+            break
+        time.sleep(1)  # 短いスリープを追加
 
 # ボットの起動
 def run_discord_bot():
-    bot.run(DISCORD_TOKEN)
+    try:
+        bot.run(DISCORD_TOKEN)
+    except Exception as e:
+        print(f"Discord ボット実行中にエラーが発生しました: {e}")
 
 if __name__ == '__main__':
     # FlaskとDiscord Botを別スレッドで実行
     flask_thread = threading.Thread(target=run_flask)
     discord_thread = threading.Thread(target=run_discord_bot)
 
-    flask_thread.start()
-    discord_thread.start()
+    try:
+        flask_thread.start()
+        discord_thread.start()
 
-    flask_thread.join()
-    discord_thread.join()
+        while flask_thread.is_alive() or discord_thread.is_alive():
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("プログラムを停止します...")
+        stop_threads = True  # 停止フラグを設定
+
+        # スレッドが終了するまで待機
+        flask_thread.join(timeout=1)  # タイムアウトを設定
+        discord_thread.join(timeout=1)  # タイムアウトを設定
+
+        print("スレッドが正常に終了しました。")
+        os._exit(0)  # プロセスを強制終了
